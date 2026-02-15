@@ -1,0 +1,128 @@
+name: Build Game Translator
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:  # ให้กด build ด้วยมือได้ทุกเมื่อ
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install XcodeGen (สร้าง .xcodeproj จาก Package.swift)
+        run: |
+          brew install xcodegen
+          gem install xcodeproj
+
+      - name: Generate Xcode project
+        run: |
+          mkdir -p GameTranslator.xcodeproj
+          cat > project.yml << 'EOF'
+name: GameTranslator
+options:
+  bundleIdPrefix: com.github.game-translator
+targets:
+  GameTranslatorApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources: [Sources/GameTranslatorApp, Sources/GameTranslatorCore]
+    dependencies:
+      - target: GameTranslatorCore
+    info:
+      path: GameTranslatorApp/Info.plist
+      properties:
+        CFBundleDisplayName: "Game Translator"
+        LSApplicationCategoryType: "public.app-category.utilities"
+        NSCameraUsageDescription: "ใช้สำหรับอัดหน้าจอเกม"
+        NSMicrophoneUsageDescription: "ใช้สำหรับอัดเสียงเกม"
+  GameTranslatorCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources: [Sources/GameTranslatorCore]
+    dependencies: []
+EOF
+          xcodegen generate
+
+      - name: Create Info.plist for app target
+        run: |
+          mkdir -p GameTranslatorApp
+          cat > GameTranslatorApp/Info.plist << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSRequiresIPhoneOS</key>
+    <true/>
+    <key>UIApplicationSceneManifest</key>
+    <dict>
+        <key>UIApplicationSupportsMultipleScenes</key>
+        <false/>
+    </dict>
+    <key>UILaunchStoryboardName</key>
+    <string>LaunchScreen</string>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array>
+        <string>arm64</string>
+    </array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+</dict>
+</plist>
+EOF
+
+      - name: Build with Xcode
+        run: |
+          xcodebuild clean build \
+            -project GameTranslator.xcodeproj \
+            -scheme GameTranslatorApp \
+            -sdk iphoneos \
+            -configuration Release \
+            -arch arm64 \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            ONLY_ACTIVE_ARCH=NO
+
+      - name: Create dummy IPA (สำหรับทดสอบโครงสร้าง)
+        run: |
+          mkdir -p Payload
+          cp -r build/Release-iphoneos/GameTranslatorApp.app Payload/
+          zip -r GameTranslator.ipa Payload
+          rm -rf Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-translator-app
+          path: GameTranslator.ipa
